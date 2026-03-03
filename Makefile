@@ -9,10 +9,10 @@ HOST_OS ?= $(shell uname | tr '[:upper:]' '[:lower:]')
 ARCH ?= $(shell uname -m)
 
 # Compiler flags
-CXXFLAGS := -std=gnu++23 -Wall -Wno-write-strings -Wno-unknown-pragmas -Wshadow
-CXXFLAGS += -fvisibility-inlines-hidden -Wno-psabi
-CXXFLAGS += -fexceptions  # Required for CLI11
-CXXFLAGS += -O2 -g
+FLAGS := -std=gnu++23 -Wall -Wno-write-strings -Wno-unknown-pragmas -Wshadow
+FLAGS += -fvisibility-inlines-hidden -Wno-psabi
+FLAGS += -fexceptions  # Required for CLI11
+
 
 # Libraries
 LIBS := -lgps
@@ -36,7 +36,7 @@ $(BUILD_DIR) $(BIN_DIR):
 
 # Build target
 $(TARGET): $(SOURCE) | $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) -o $@ $< $(LIBS)
+	$(CXX) -o $@ $(FLAGS) $(CXXFLAGS) $< $(LIBS)
 
 # Clean build artifacts
 .PHONY: clean
