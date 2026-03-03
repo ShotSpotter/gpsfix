@@ -13,12 +13,13 @@
 
 #include <iostream>
 #include <format>
+#include <cmath>
 #include <ctime>
 #include <unistd.h>
 #include <libgpsmm.h>
 #include <CLI/CLI.hpp>
 
-#define VERSION "1.0.0"
+#define VERSION "1.0.2"
 #define WAIT_TIME_MICROSECONDS 10000
 
 int main(int argc, char* argv[]) {
@@ -30,7 +31,6 @@ int main(int argc, char* argv[]) {
 	std::string port = DEFAULT_GPSD_PORT;
 	bool jsonOutput = false;
 	bool quiet = false;
-	bool waitForFix = false;
 
 	// Note: .default_val() and .default_str() not supported by BR2_PACKAGE_CLI11 in buildroot 2024.08
 	app.add_option("-n,--num-reads", numReads, "Number of readings (0 for continuous, default: 0)");
@@ -38,7 +38,6 @@ int main(int argc, char* argv[]) {
 	app.add_option("--port", port, "GPSD port (default: 2947)");
 	app.add_flag("-j,--json", jsonOutput, "Output JSON lines (machine-readable)");
 	app.add_flag("-q,--quiet", quiet, "Suppress informational messages");
-	app.add_flag("-w,--wait", waitForFix, "Wait for valid GPS fix before reporting");
 
 	CLI11_PARSE(app, argc, argv);
 
@@ -95,11 +94,11 @@ int main(int argc, char* argv[]) {
 
 	int readCount = 0;
 	time_t lastReport = 0;
-	time_t startTime = time(nullptr);
 	time_t lastDataTime = time(nullptr);
-	const int WAIT_FOR_FIX_SECONDS = 5;  // Wait up to 5 seconds for first fix
+	// satellites_visible starts at 0 and is only updated by SKY messages,
+	// so it must be persisted manually across reads.
+	int lastSvs = 0;
 	const int NO_DATA_TIMEOUT_SECONDS = 10;  // Exit if no data received for 10 seconds
-	bool waitingForFirstFix = waitForFix;  // Only wait if --wait flag specified
 
 	while (numReads == 0 || readCount < numReads) {
 		// Check for timeout if no data received
@@ -115,28 +114,22 @@ int main(int argc, char* argv[]) {
 				// Update last data time
 				lastDataTime = time(nullptr);
 
-				// Wait for a valid fix before starting to report, but timeout after 5 seconds
-				if (waitingForFirstFix) {
-					time_t elapsed = time(nullptr) - startTime;
-					if (data->fix.mode >= MODE_2D && (data->set & LATLON_SET)) {
-						// Got a fix, start reporting
-						waitingForFirstFix = false;
-						lastReport = time(nullptr);
-					} else if (elapsed >= WAIT_FOR_FIX_SECONDS) {
-						// Timeout - report even without fix
-						if (!jsonOutput && !quiet) {
-							std::cerr << "Note: Starting reports without GPS fix (waited " << WAIT_FOR_FIX_SECONDS << "s)" << std::endl;
-						}
-						waitingForFirstFix = false;
-						lastReport = time(nullptr);
-					} else {
-						// Still waiting, continue reading
-						continue;
-					}
-				}
+				// Accumulate satellite count on every message, not just at report time.
+				// SKY messages (which carry satellites_visible) can arrive between report
+				// boundaries and would be silently discarded if we only updated inside
+				// the rate-limit block.
+				if (data->satellites_visible > 0)
+					lastSvs = data->satellites_visible;
 
 				// Only report once per second
 				if (now > lastReport) {
+					// Skip reporting if no TPV has been received yet (mode 0 = MODE_NOT_SEEN),
+					// or if no SKY has been received yet (lastSvs == 0); both produce
+					// uninformative all-zeros rows. Don't advance lastReport so the first
+					// complete report fires immediately once both arrive.
+					if (data->fix.mode == MODE_NOT_SEEN || lastSvs == 0)
+						continue;
+
 					lastReport = now;
 					readCount++;
 
@@ -153,24 +146,27 @@ int main(int argc, char* argv[]) {
 					}
 					strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%SZ", tm_info);
 
-					// Extract data
-					int mode = data->fix.mode;  // 0=not seen, 1=no fix, 2=2D, 3=3D
-					double lat = (data->set & LATLON_SET) ? data->fix.latitude : 0.0;
-					double lon = (data->set & LATLON_SET) ? data->fix.longitude : 0.0;
-					double hae = (data->set & ALTITUDE_SET) ? data->fix.altHAE : 0.0;
-					double msl = (data->set & ALTITUDE_SET) ? data->fix.altMSL : 0.0;
-					double pdop = (data->set & DOP_SET) ? data->dop.pdop : 0.0;
-					int svs = data->satellites_visible;
+					// Extract data.
+					// Per libgps docs, gps_data_t fields accumulate state across reads;
+					// data->set reflects only the current message but underlying fields persist.
+					// Use std::isfinite() to validate floats rather than relying on data->set bits.
+					// satellites_visible is updated on every incoming message (above) because
+					// SKY messages can arrive between report boundaries.
+					int mode = data->fix.mode;
+					double lat = std::isfinite(data->fix.latitude)  ? data->fix.latitude  : 0.0;
+					double lon = std::isfinite(data->fix.longitude) ? data->fix.longitude : 0.0;
+					double hae = std::isfinite(data->fix.altHAE)    ? data->fix.altHAE    : 0.0;
+					double msl = std::isfinite(data->fix.altMSL)    ? data->fix.altMSL    : 0.0;
+					double pdop = std::isfinite(data->dop.pdop)     ? data->dop.pdop      : 0.0;
+					int svs = lastSvs;
 
 					// Determine fix status
 					std::string fixStatus = "NO_FIX";
-					if (data->set & (STATUS_SET | MODE_SET)) {
-						if (data->fix.mode >= MODE_2D) {
-							if (data->fix.status >= STATUS_DGPS) {
-								fixStatus = "DGPS";
-							} else {
-								fixStatus = (data->fix.mode == MODE_2D) ? "2D" : "3D";
-							}
+					if (mode >= MODE_2D) {
+						if (data->fix.status >= STATUS_DGPS) {
+							fixStatus = "DGPS";
+						} else {
+							fixStatus = (mode == MODE_2D) ? "2D" : "3D";
 						}
 					}
 

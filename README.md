@@ -6,7 +6,7 @@ GPSD includes a handful of samples clients (`cgps`, `xgps`, `gpsmon`) but none o
 an easy way to read the current fix and dump it to `stdout` like this:
 
 ```
-$ ./gpsfix -q -w -j -n1
+$ ./gpsfix -q -j -n1
 {"timestamp":"2026-03-03T03:07:12Z","count":1,"mode":3,"lat":41.2901729,"lon":-82.2266160,"hae":216.44,"msl":250.88,"pdop":1.170,"svs":32,"fix":"DGPS"}
 ```
 
@@ -17,7 +17,6 @@ $ ./gpsfix -q -w -j -n1
 - `--port <port>` - GPSD port (default: 2947)
 - `-j, --json` - Output JSON lines (machine-readable)
 - `-q, --quiet` - Suppress informational messages
-- `-w, --wait` - Wait for valid GPS fix before reporting (default: report immediately)
 - `-v, --version` - Show version information
 
 ## Usage Examples
@@ -36,24 +35,9 @@ $ ./gpsfix -q -w -j -n1
 ./gpsfix --host 192.168.1.100 --port 2947
 
 # Suppress all informational messages and return the first valid fix in json format, then exit:
-./gpsfix -q -w -j -n1
+./gpsfix -q -j -n1
 
 ```
-
-GPSD doesn't appear to cache the last valid fix; `gps_data_t` is invalid until the next fix is reported by the hardware. By default, `gpsfix` reports whatever gpsd provides; this may indicate `NO_FIX` even though the gps itself actually has a fix:
-```
-$ ./gpsfix
-Connected to gpsd at localhost:2947
-Found GPS device: /dev/ttymxc0 (u-blox, SW ROM CORE 3.01 (107888),HW 00080000) @ 115200N1
-           Timestamp  Count Mode     Latitude    Longitude    HAE (m)    MSL (m)     PDOP    SVs   Fix
---------------------------------------------------------------------------------------------------------
-2026-03-03T03:12:11Z      1    0    0.0000000    0.0000000       0.00       0.00    0.000      0  NO_FIX
-2026-03-03T03:12:12Z      2    0    0.0000000    0.0000000       0.00       0.00    1.120     32  NO_FIX
-2026-03-03T03:12:12Z      3    3   41.2901353  -82.2266007     214.28     248.72    1.100     32  DGPS
-2026-03-03T03:12:13Z      4    3   41.2901356  -82.2266001     214.31     248.75    1.100     32  DGPS
-```
-
-These bogus fixes can be filtered with the `-w, --wait` option, which up to 5 seconds for a valid GPS fix (mode >= 2) before starting to report. If no fix within 5 seconds, it begins reporting anyway.
 
 `gpsfix`  returns both elevation data in both HAE and MSL. HAE is the natural elevation measure
 in the GPS system, but Google Earth and many other tools expect MSL. The difference between the
@@ -110,7 +94,7 @@ $ gpsfix -n 3 --json
 Parse json output with `jq`:
 ```bash
 # Get lat/lon only after fix acquired
-gpsfix -n1 --wait --json --quiet | jq -r '"\(.lat), \(.lon)"'
+gpsfix -n1 --json --quiet | jq -r '"\(.lat), \(.lon)"'
 
 # Check fix status
 gpsfix -n1 --json --quiet | jq -r '.fix'
