@@ -110,7 +110,7 @@ fi
 ## Dependencies
 
 - libgps (gpsd client library) - package: libgps-dev
-- [CLI11](https://github.com/CLIUtils/CLI11) (header-only CLI parser) - package: libcli-dev
+- [CLI11](https://github.com/CLIUtils/CLI11) (header-only CLI parser) - package: libcli11-dev
 - C++23, primarily so that we can use [std::format](https://en.cppreference.com/w/cpp/utility/format/format.html).
 
 ## Similar Projects
